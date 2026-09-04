@@ -5,42 +5,57 @@ const FA_URL = 'https://fulltime.thefa.com/fixtures/1/100.html?selectedSeason=69
 async function scrapeFixtures() {
   try {
     const response = await fetch(FA_URL, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
     });
+    
     const html = await response.text();
     const fixtures = [];
+    const clean = (str) => str ? str.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim() : '';
 
-    // Parse HTML blocks natively without heavy cheerio package
-    const blocks = html.split('class="fixture-single"');
-    blocks.shift(); // Remove content before first fixture
+    // Split rows out of the FA Full-Time HTML table structure
+    const rows = html.split(/<tr[^>]*>/i);
+    let currentDate = '';
 
-    for (const block of blocks) {
-      const dateMatch = block.match(/class="fixture-date"[^>]*>([\s\S]*?)<\/span>/i);
-      const homeMatch = block.match(/class="home-team"[^>]*>([\s\S]*?)<\/td>/i);
-      const awayMatch = block.match(/class="away-team"[^>]*>([\s\S]*?)<\/td>/i);
-      const statusMatch = block.match(/class="score-or-time"[^>]*>([\s\S]*?)<\/td>/i);
-      const venueMatch = block.match(/class="venue-col"[^>]*>([\s\S]*?)<\/td>/i);
+    for (const row of rows) {
+      // Capture date header rows
+      if (row.includes('class="date"') || row.includes('date-row') || row.includes('header-date')) {
+        const dateMatch = row.match(/<td[^>]*>([\s\S]*?)<\/td>/i) || row.match(/<th[^>]*>([\s\S]*?)<\/th>/i);
+        if (dateMatch) currentDate = clean(dateMatch[1]);
+      }
 
-      const stripTags = (str) => str ? str.replace(/<[^>]*>/g, '').trim() : '';
+      // Capture fixture content rows
+      if (row.includes('home-team') || row.includes('away-team') || row.includes('fixture')) {
+        const cells = row.split(/<td[^>]*>/i).slice(1);
+        
+        if (cells.length >= 2) {
+          const rowText = cells.map(c => clean(c.split('</td>')[0]));
+          
+          // Match team names from row text
+          const homeTeam = rowText.find(t => t.toLowerCase().includes('melksham') || t.length > 3) || '';
+          const awayTeam = rowText.slice().reverse().find(t => t.length > 3 && t !== homeTeam) || '';
+          
+          const scoreOrTime = rowText.find(t => /\b\d{1,2}:\d{2}\b|\b\d+\s*-\s*\d+\b/i.test(t)) || 'VS';
+          const venue = rowText.find(t => t.toLowerCase().includes('stadium') || t.toLowerCase().includes('park') || t.toLowerCase().includes('field') || t.toLowerCase().includes('road') || t.toLowerCase().includes('ground')) || '';
 
-      const homeTeam = stripTags(homeMatch ? homeMatch[1] : '');
-      const awayTeam = stripTags(awayMatch ? awayMatch[1] : '');
-
-      if (homeTeam && awayTeam) {
-        fixtures.push({
-          date: stripTags(dateMatch ? dateMatch[1] : ''),
-          homeTeam,
-          awayTeam,
-          scoreOrTime: stripTags(statusMatch ? statusMatch[1] : ''),
-          venue: stripTags(venueMatch ? venueMatch[1] : '')
-        });
+          if (homeTeam && awayTeam && homeTeam !== awayTeam) {
+            fixtures.push({
+              date: currentDate || 'Upcoming',
+              homeTeam,
+              awayTeam,
+              scoreOrTime,
+              venue
+            });
+          }
+        }
       }
     }
 
     fs.writeFileSync('fixtures.json', JSON.stringify(fixtures, null, 2));
     console.log(`Saved ${fixtures.length} fixtures to fixtures.json`);
   } catch (err) {
-    console.error('Error fetching fixtures:', err.message);
+    console.error('Scraping error:', err.message);
     process.exit(1);
   }
 }
