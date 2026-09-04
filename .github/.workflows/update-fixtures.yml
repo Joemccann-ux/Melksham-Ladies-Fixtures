@@ -2,7 +2,7 @@ name: Auto Update Fixtures
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs daily at midnight
+    - cron: '0 21 * * 1,3,5' # Runs at 9:00 PM UTC every Monday, Wednesday, and Friday
   workflow_dispatch: # Allows manual test runs
 
 jobs:
