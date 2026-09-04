@@ -1,0 +1,22 @@
+name: Auto Update Fixtures
+
+on:
+  schedule:
+    - cron: '0 21 * * 1,3,5' # Runs at 9:00 PM UTC on Mon, Wed, Fri
+  workflow_dispatch: # Allows manual test runs
+
+jobs:
+  update-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: npm run scrape
+      - run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add fixtures.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "auto: update fixtures" && git push)
