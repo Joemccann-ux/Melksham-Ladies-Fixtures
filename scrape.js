@@ -1,43 +1,53 @@
 const fs = require('fs');
-const puppeteer = require('puppeteer-core');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { createWorker } = require('tesseract.js');
+
+puppeteer.use(StealthPlugin());
 
 const FA_URL = 'https://fulltime.thefa.com/fixtures/1/100.html?selectedSeason=698763392&selectedFixtureGroupAgeGroup=0&previousSelectedFixtureGroupAgeGroup=&selectedFixtureGroupKey=1_790673203&previousSelectedFixtureGroupKey=1_790673203&selectedDateCode=all&selectedRelatedFixtureOption=3&selectedClub=827700827&previousSelectedClub=827700827&selectedTeam=&selectedFixtureDateStatus=&selectedFixtureStatus=';
 
 async function processFAFixtures() {
-  console.log('Launching browser to capture full schedule...');
+  console.log('Launching stealth browser to bypass Cloudflare...');
   let browser;
 
   try {
     browser = await puppeteer.launch({
-      executablePath: '/usr/bin/google-chrome',
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled'
+      ]
     });
 
     const page = await browser.newPage();
-    // Extra tall viewport (4500px) ensures ALL table rows fit without scrolling truncation
     await page.setViewport({ width: 1600, height: 4500, deviceScaleFactor: 2 });
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
+    // Custom headers to look like a standard desktop browser
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8'
+    });
+
+    console.log('Navigating to FA page...');
     await page.goto(FA_URL, { waitUntil: 'networkidle2', timeout: 60000 });
-    await new Promise(r => setTimeout(r, 4000));
+    await new Promise(r => setTimeout(r, 5000));
 
-    // Hide banners and zoom out slightly to fit all rows clearly
+    // Hide banners and overlays
     await page.evaluate(() => {
       const selectorsToHide = ['#onetrust-banner-sdk', 'header', 'footer', '.ad-banner', '.nav-container'];
       selectorsToHide.forEach(s => {
         document.querySelectorAll(s).forEach(el => el.style.display = 'none');
       });
-      document.body.style.zoom = '90%';
     });
 
     await page.screenshot({ path: 'fixtures.png', fullPage: true });
-    console.log('Saved full-length screenshot to fixtures.png');
+    console.log('Saved stealth screenshot to fixtures.png');
     await browser.close();
 
-    // Perform OCR scan on the full image
-    console.log('Scanning full image with Tesseract OCR...');
+    // Perform OCR scan
+    console.log('Scanning fixtures.png with Tesseract OCR...');
     const worker = await createWorker('eng');
     const { data: { text } } = await worker.recognize('fixtures.png');
     await worker.terminate();
@@ -53,6 +63,7 @@ async function processFAFixtures() {
         const rawDate = dateMatch ? dateMatch[0] : '';
         const matchTime = timeMatch ? timeMatch[0] : '14:00';
 
+        // Detect Venues
         let venue = '';
         const venueKeywords = [
           'MEADS OF MELKSHAM COMMUNITY FOOTBALL STADIUM',
@@ -73,6 +84,7 @@ async function processFAFixtures() {
           }
         }
 
+        // Clean out noise from team strings
         let cleanedLine = line
           .replace(/LP|LC|HC/g, '')
           .replace(/\d{2}\/\d{2}\/\d{2}/g, '')
@@ -90,7 +102,7 @@ async function processFAFixtures() {
           let home = teams[0].replace(/\s+/g, ' ').trim();
           let away = teams[1].replace(/\s+/g, ' ').trim();
 
-          const cleanTeamName = (name) => {
+          const sanitizeTeam = (name) => {
             return name
               .replace(/^FC\s+FC/, 'FC')
               .replace(/^Mm\s+/, '')
@@ -99,8 +111,8 @@ async function processFAFixtures() {
               .trim();
           };
 
-          home = cleanTeamName(home);
-          away = cleanTeamName(away);
+          home = sanitizeTeam(home);
+          away = sanitizeTeam(away);
 
           if (home && away) {
             fixtures.push({
@@ -115,11 +127,11 @@ async function processFAFixtures() {
       }
     });
 
-    console.log(`Successfully parsed ${fixtures.length} total matches from OCR.`);
+    console.log(`Parsed ${fixtures.length} matches via stealth OCR.`);
     fs.writeFileSync('fixtures.json', JSON.stringify(fixtures, null, 2));
 
   } catch (err) {
-    console.error('OCR Parsing Error:', err.message);
+    console.error('Stealth Scraper Error:', err.message);
   } finally {
     process.exit(0);
   }
